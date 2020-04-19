@@ -11,7 +11,7 @@ import nltk
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
@@ -45,12 +45,15 @@ def load_data(database_filepath):
     
     # set X and Y values 
     X = df.message.values
-    Y = df.iloc[:,5:]
+    remove_col = ['id', 'message', 'original', 'genre']
+    y = df.loc[:, ~df.columns.isin(remove_col)]
+    y.loc[:,'related'] = y['related'].replace(2,1)
     
     # set label names
-    category_names = Y.columns
+    category_names = y.columns
     
-    return X, Y, category_names
+    return X, y, category_names
+    
 
 def tokenize(text):
     """
@@ -82,25 +85,8 @@ def tokenize(text):
     clean_tokens = [lemmatizer.lemmatize(tok).lower().strip() for tok in tokens]    
 
     return clean_tokens
-
-class StartingVerbExtractor(BaseEstimator, TransformerMixin):
-
-    def starting_verb(self, text):
-        sentence_list = nltk.sent_tokenize(text)
-        for sentence in sentence_list:
-            pos_tags = nltk.pos_tag(tokenize(sentence))
-            first_word, first_tag = pos_tags[0]
-            if first_tag in ['VB', 'VBP'] or first_word == 'RT':
-                return True
-        return False
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        X_tagged = pd.Series(X).apply(self.starting_verb)
-        return pd.DataFrame(X_tagged)
     
+
 def build_model():
     """
     Description:
@@ -120,7 +106,6 @@ def build_model():
                 ('tfidf', TfidfTransformer())
             ])),
 
-            ('starting_verb', StartingVerbExtractor())
         ])),
 
         ('clf', MultiOutputClassifier(RandomForestClassifier()))
@@ -128,14 +113,13 @@ def build_model():
     
     # Create grid search parameters
     parameters = {
-        'features__text_pipeline__vect__ngram_range': ((1, 1), (1, 2)),
+        'features__text_pipeline__tfidf__use_idf': (True, False),
         'features__text_pipeline__vect__max_df': (0.5, 0.75, 1.0),
-        'features__text_pipeline__vect__max_features': (None, 5000, 10000),
-        'clf__estimator__n_estimators': [50, 100, 200],
         'clf__estimator__min_samples_split': [2, 3, 4]
     }
 
-    cv = GridSearchCV(pipeline, param_grid=parameters, scoring='f1_micro', n_jobs=-1)
+    cv = GridSearchCV(pipeline, param_grid=parameters, n_jobs=10, verbose=10)
+
     return cv
 
 
